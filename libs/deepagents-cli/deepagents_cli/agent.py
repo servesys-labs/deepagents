@@ -128,14 +128,13 @@ The filesystem backend is currently operating in: `{Path.cwd()}`
         working_dir_section
         + """### Memory System Reminder
 
-Your long-term memory is stored in /memories/ and persists across sessions.
+**AVOCADODB-FIRST PROTOCOL:**
+For ANY questions about the codebase/documentation, use `avocado_compile_context` FIRST.
+Only use read_file/grep if AvocadoDB fails or you're editing files.
 
-**IMPORTANT - Check memories before answering:**
-- When asked "what do you know about X?" → Run `ls /memories/` FIRST, then read relevant files
-- When starting a task → Check if you have guides or examples in /memories/
-- At the beginning of new sessions → Consider checking `ls /memories/` to see what context you have
+Your long-term agent memory is in /memories/ (for YOUR preferences, not codebase docs).
 
-Base your answers on saved knowledge (from /memories/) when available, supplemented by general knowledge.
+**Priority Order:** avocado_compile_context (codebase) → /memories/ (agent knowledge) → general knowledge
 
 ### Human-in-the-Loop Tool Approval
 
