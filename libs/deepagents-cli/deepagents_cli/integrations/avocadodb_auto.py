@@ -10,6 +10,7 @@ Automatically handles:
 import atexit
 import os
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Optional
@@ -20,18 +21,23 @@ import requests
 class AvocadoDBManager:
     """Manages AvocadoDB server lifecycle automatically."""
 
-    def __init__(self, auto_start: bool = True, auto_ingest: bool = True):
+    def __init__(self, auto_start: bool = True, auto_ingest: bool = True, background_ingest: bool = True):
         """Initialize AvocadoDB manager.
 
         Args:
             auto_start: Automatically start server if not running
             auto_ingest: Automatically ingest current directory on first start
+            background_ingest: Periodically re-ingest changed files in background
         """
         self.server_url = os.environ.get("AVOCADODB_URL", "http://localhost:8765")
         self.auto_start = auto_start
         self.auto_ingest = auto_ingest
+        self.background_ingest = background_ingest
         self.server_process: Optional[subprocess.Popen] = None
         self.binary_path: Optional[Path] = None
+        self._ingest_thread: Optional[threading.Thread] = None
+        self._stop_ingest = threading.Event()
+        self._last_ingested: dict[Path, float] = {}  # Track file modification times
 
         # Find or install AvocadoDB
         if self.auto_start:
@@ -271,3 +277,73 @@ def ensure_running() -> bool:
 
 
 __all__ = ["AvocadoDBManager", "get_manager", "ensure_running"]
+    def _background_ingest_loop(self):
+        """Background thread that periodically re-ingests changed files."""
+        cwd = Path.cwd()
+
+        while not self._stop_ingest.is_set():
+            try:
+                # Check for changed files every 30 seconds
+                if self._stop_ingest.wait(timeout=30):
+                    break
+
+                if not self.is_running() or not self.binary_path:
+                    continue
+
+                ingest_binary = self.binary_path.parent / "avocado"
+                if not ingest_binary.exists():
+                    continue
+
+                # Find files matching our patterns
+                paths_to_check = []
+                for pattern in ["docs/**/*.md", "**/ README.md", "*.md", "src/**/*.py", "src/**/*.ts", "src/**/*.js"]:
+                    try:
+                        matching = list(cwd.glob(pattern))
+                        paths_to_check.extend(matching[:50])  # Limit to prevent too many files
+                    except:
+                        pass
+
+                # Re-ingest files that have changed
+                re_ingested = 0
+                for path in paths_to_check:
+                    if not path.is_file():
+                        continue
+
+                    try:
+                        mtime = path.stat().st_mtime
+                        last_mtime = self._last_ingested.get(path, 0)
+
+                        # If file is new or modified, re-ingest
+                        if mtime > last_mtime:
+                            subprocess.run(
+                                [str(ingest_binary), "ingest", str(path)],
+                                capture_output=True,
+                                timeout=10,
+                            )
+                            self._last_ingested[path] = mtime
+                            re_ingested += 1
+                    except:
+                        pass
+
+                if re_ingested > 0:
+                    print(f"🥑 Background: Re-ingested {re_ingested} changed files")
+
+            except Exception:
+                pass  # Silently continue on errors
+
+    def _start_background_ingest(self):
+        """Start background ingestion thread."""
+        if self.background_ingest and not self._ingest_thread:
+            self._ingest_thread = threading.Thread(
+                target=self._background_ingest_loop,
+                daemon=True,
+                name="AvocadoDB-Ingest"
+            )
+            self._ingest_thread.start()
+
+    def _stop_background_ingest(self):
+        """Stop background ingestion thread."""
+        if self._ingest_thread:
+            self._stop_ingest.set()
+            self._ingest_thread.join(timeout=2)
+            self._ingest_thread = None
