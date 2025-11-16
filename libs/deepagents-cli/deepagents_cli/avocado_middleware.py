@@ -25,47 +25,11 @@ class AvocadoDBExclusivityMiddleware(AgentMiddleware):
     ensuring AvocadoDB is used exclusively for codebase questions.
     """
 
-    # Track if we've seen avocado in this turn
-    _has_avocado_this_turn: bool = False
-
     def __init__(self):
         """Initialize middleware."""
         super().__init__()
         # Tools to block when avocado_compile_context is active
         self.blocked_tools = {"read_file", "grep", "ls", "glob"}
-        self._blocked_this_turn = []
-
-    def wrap_tool_call(self, tool_call: Any, config: RunnableConfig) -> Any:
-        """Intercept tool calls and block read tools when AvocadoDB is present.
-
-        This is called for EACH tool call before execution (sync version).
-        """
-        # Handle both dict and object-style tool calls
-        if isinstance(tool_call, dict):
-            tool_name = tool_call.get("name", "")
-        else:
-            tool_name = getattr(tool_call, "name", "")
-
-        # If this is avocado_compile_context, mark it
-        if tool_name == "avocado_compile_context":
-            self._has_avocado_this_turn = True
-            return tool_call
-
-        # If we've seen avocado and this is a blocked tool, filter it out
-        if self._has_avocado_this_turn and tool_name in self.blocked_tools:
-            if tool_name not in self._blocked_this_turn:
-                self._blocked_this_turn.append(tool_name)
-            return tool_call
-
-        return tool_call
-
-    async def awrap_tool_call(self, tool_call: Any, config: RunnableConfig) -> Any:
-        """Async version of wrap_tool_call.
-
-        This is called for EACH tool call before execution (async version).
-        """
-        # Just call the sync version since we don't need async operations
-        return self.wrap_tool_call(tool_call, config)
 
     async def __call__(
         self,
