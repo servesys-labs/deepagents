@@ -26,20 +26,22 @@ def avocado_compile_context(
     mmr_lambda: float = 0.5,
     enable_mmr: bool = True,
 ) -> dict[str, Any]:
-    """Compile deterministic, citation-backed context from AvocadoDB knowledge base.
+    """PRIMARY TOOL: Use this FIRST for any questions about the codebase or documentation.
 
-    AvocadoDB provides 100% deterministic context compilation - the same query
-    always returns the same context, making your agent's responses reproducible
-    and auditable. Every span includes exact line number citations.
+    AvocadoDB provides deterministic, citation-backed context compilation - the same query
+    always returns the same context, making responses reproducible and auditable.
+
+    **WHEN TO USE (DEFAULT for codebase questions):**
+    - ANY question about the codebase, documentation, or project
+    - Questions like "what is this project", "how does X work", "explain Y"
+    - Searching for implementations, patterns, or architecture
+    - Understanding features, APIs, or configurations
+
+    **PREFER THIS OVER grep/read_file** - it provides semantic search with citations.
+    Only use filesystem tools if this fails or for editing files.
 
     This tool searches your ingested codebase/documentation and returns relevant
-    context that you MUST synthesize into a natural response for the user.
-
-    Use this when you need to:
-    - Retrieve information from ingested documentation or code
-    - Get verifiable, citation-backed answers
-    - Ensure consistent responses across multiple runs
-    - Access knowledge with perfect reproducibility
+    context that you MUST synthesize into a natural response for the user
 
     Args:
         query: Search query describing what information you need (be specific)
