@@ -203,12 +203,54 @@ class AvocadoDBManager:
             except:
                 self.server_process.kill()
 
+    def _detect_project_type(self, cwd: Path) -> list[str]:
+        """Detect project type and return appropriate source patterns."""
+        patterns = []
+
+        # Python project
+        if (cwd / "pyproject.toml").exists() or (cwd / "setup.py").exists() or (cwd / "requirements.txt").exists():
+            patterns.extend(["**/*.py", "**/*.pyi"])
+
+        # JavaScript/TypeScript (Node.js)
+        if (cwd / "package.json").exists():
+            patterns.extend(["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx"])
+
+        # Rust
+        if (cwd / "Cargo.toml").exists():
+            patterns.extend(["**/*.rs"])
+
+        # Go
+        if (cwd / "go.mod").exists():
+            patterns.extend(["**/*.go"])
+
+        # Java/Kotlin
+        if (cwd / "pom.xml").exists() or (cwd / "build.gradle").exists():
+            patterns.extend(["**/*.java", "**/*.kt"])
+
+        # C/C++
+        if (cwd / "Makefile").exists() or (cwd / "CMakeLists.txt").exists():
+            patterns.extend(["**/*.c", "**/*.cpp", "**/*.h", "**/*.hpp"])
+
+        # Ruby
+        if (cwd / "Gemfile").exists():
+            patterns.extend(["**/*.rb"])
+
+        # PHP
+        if (cwd / "composer.json").exists():
+            patterns.extend(["**/*.php"])
+
+        # If no project type detected, use common patterns
+        if not patterns:
+            patterns = ["**/*.py", "**/*.js", "**/*.ts", "**/*.java", "**/*.go", "**/*.rs"]
+
+        return patterns
+
     def _auto_ingest(self):
         """Auto-ingest current directory on first start."""
         if not self.binary_path:
             return
 
-        cwd = Path.cwd()
+        cwd = Path.cwd())
         print(f"🥑 Auto-ingesting {cwd}...")
 
         # Find ingest binary
@@ -219,20 +261,33 @@ class AvocadoDBManager:
             return
 
         try:
-            # Ingest documentation AND source code
-            paths_to_ingest = []
+            # Detect project type and get appropriate patterns
+            source_patterns = self._detect_project_type(cwd)
 
-            for pattern in [
-                "README.md",           # Main readme
-                "QUICKSTART.md",       # Quick start guide
-                "docs/**/*.md",        # Documentation
-                "**/src/**/*.rs",      # Rust source
-                "**/src/**/*.py",      # Python source
-                "**/src/**/*.ts",      # TypeScript source
-                "**/src/**/*.js",      # JavaScript source
-            ]:
+            # Always ingest documentation
+            doc_patterns = [
+                "README.md",
+                "QUICKSTART.md",
+                "docs/**/*.md",
+                "*.md",
+            ]
+
+            # Combine all patterns
+            all_patterns = doc_patterns + source_patterns
+
+            paths_to_ingest = []
+            for pattern in all_patterns:
                 try:
                     matching = list(cwd.glob(pattern))
+                    # Exclude common directories
+                    matching = [
+                        p for p in matching
+                        if not any(part in p.parts for part in [
+                            "node_modules", ".git", "venv", ".venv",
+                            "__pycache__", "target", "build", "dist",
+                            ".next", ".cache"
+                        ])
+                    ]
                     paths_to_ingest.extend(matching[:50])  # Limit per pattern
                 except:
                     pass
