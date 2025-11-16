@@ -7,11 +7,15 @@ Unlike traditional RAG systems, AvocadoDB guarantees:
 - 95%+ token efficiency (vs 60-70% with traditional RAG)
 - Zero duplicate content
 
+Auto-start: Set AVOCADODB_AUTO_START=true to automatically start server
+
 Learn more: https://github.com/avocadodb/avocadodb
 """
 
 import os
 from typing import Any
+
+from deepagents_cli.integrations.avocadodb_auto import ensure_running
 
 
 def avocado_compile_context(
@@ -71,6 +75,9 @@ def avocado_compile_context(
         "The authentication system uses JWT tokens (see auth.md:10-25). The token
         validation happens in the middleware layer (src/auth.ts:45-78)..."
     """
+    # Auto-start server if configured
+    ensure_running()
+
     try:
         import requests
 
@@ -132,17 +139,19 @@ def avocado_compile_context(
     except requests.exceptions.ConnectionError:
         return {
             "success": False,
-            "error": "Cannot connect to AvocadoDB server",
+            "error": "AvocadoDB not available - falling back to other tools",
             "context": "",
             "citations": [],
             "query": query,
             "hint": (
-                "AvocadoDB server not running. To start:\n"
-                "  1. Install: git clone https://github.com/avocadodb/avocadodb && cd avocadodb\n"
-                "  2. Build: cargo build --release\n"
-                "  3. Start: ./target/release/avocado-server\n"
-                "  4. Ingest: ./target/release/avocado ingest ./docs --recursive\n"
-                "  5. Set URL (optional): export AVOCADODB_URL=http://localhost:8080"
+                "💡 Want deterministic context retrieval? Install AvocadoDB:\n\n"
+                "   Quick Install (copy-paste):\n"
+                "   curl -fsSL https://raw.githubusercontent.com/avocadodb/avocadodb/main/install.sh | sh\n\n"
+                "   Or manual install:\n"
+                "   git clone https://github.com/avocadodb/avocadodb && cd avocadodb\n"
+                "   cargo build --release && ./target/release/avocado-server &\n\n"
+                "   Benefits: 100% deterministic, citation-backed, 95% token efficiency\n"
+                "   Docs: https://github.com/avocadodb/avocadodb"
             ),
         }
     except Exception as e:
