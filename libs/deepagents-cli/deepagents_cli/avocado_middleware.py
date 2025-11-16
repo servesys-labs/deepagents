@@ -8,10 +8,11 @@ This ensures deterministic, AvocadoDB-first behavior.
 
 from typing import Any
 
+from langchain.agents.middleware import AgentMiddleware
 from langchain_core.runnables import RunnableConfig
 
 
-class AvocadoDBExclusivityMiddleware:
+class AvocadoDBExclusivityMiddleware(AgentMiddleware):
     """Middleware that enforces AvocadoDB-only execution for codebase queries.
 
     When avocado_compile_context is called, blocks these tools:
