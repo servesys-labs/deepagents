@@ -27,7 +27,7 @@ class AvocadoDBManager:
             auto_start: Automatically start server if not running
             auto_ingest: Automatically ingest current directory on first start
         """
-        self.server_url = os.environ.get("AVOCADODB_URL", "http://localhost:8080")
+        self.server_url = os.environ.get("AVOCADODB_URL", "http://localhost:8765")
         self.auto_start = auto_start
         self.auto_ingest = auto_ingest
         self.server_process: Optional[subprocess.Popen] = None
@@ -148,9 +148,18 @@ class AvocadoDBManager:
         print("🥑 Starting AvocadoDB server...")
 
         try:
-            # Start server in background
+            # Extract port from server_url for PORT env var
+            import urllib.parse
+            parsed_url = urllib.parse.urlparse(self.server_url)
+            port = str(parsed_url.port or 8080)
+
+            # Start server in background with PORT env var
+            env = os.environ.copy()
+            env["PORT"] = port
+
             self.server_process = subprocess.Popen(
                 [str(self.binary_path)],
+                env=env,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,  # Detach from parent
@@ -237,9 +246,8 @@ def get_manager() -> AvocadoDBManager:
     """Get or create global AvocadoDB manager instance."""
     global _manager
     if _manager is None:
-        # Auto-start disabled by default for now
-        # Users can enable via environment variable
-        auto_start = os.environ.get("AVOCADODB_AUTO_START", "false").lower() == "true"
+        # Auto-start ENABLED by default (can disable with AVOCADODB_AUTO_START=false)
+        auto_start = os.environ.get("AVOCADODB_AUTO_START", "true").lower() == "true"
         _manager = AvocadoDBManager(auto_start=auto_start, auto_ingest=auto_start)
 
     return _manager

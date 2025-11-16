@@ -81,7 +81,7 @@ On first start in a directory, AvocadoDB automatically ingests:
 # Enable/disable auto-start (default: false)
 export AVOCADODB_AUTO_START=true
 
-# Custom server URL (default: http://localhost:8080)
+# Custom server URL (default: http://localhost:8765)
 export AVOCADODB_URL="http://localhost:9000"
 ```
 
@@ -155,8 +155,8 @@ cargo build --release
 
 ### **Server won't start:**
 ```bash
-# Check if port 8080 is in use:
-lsof -i :8080
+# Check if port 8765 is in use:
+lsof -i :8765
 
 # Use different port:
 export AVOCADODB_URL="http://localhost:9000"

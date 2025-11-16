@@ -228,7 +228,7 @@ def _format_avocado_compile_context_description(tool_call: ToolCall, state: Agen
         f"Query: {query}\n"
         f"Token budget: {token_budget}\n\n"
         f"✅ Deterministic retrieval (same query → same context)\n"
-        f"⚠️  Requires AvocadoDB server running on localhost:8080"
+        f"✅ Auto-starts on port 8765 (or set AVOCADODB_URL)"
     )
 
 

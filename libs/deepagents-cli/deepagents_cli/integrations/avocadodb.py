@@ -67,9 +67,12 @@ def avocado_compile_context(
     5. NEVER show the raw JSON to the user - always provide a formatted response
 
     Setup:
-        1. Start AvocadoDB server: ./target/release/avocado-server
+        With auto-start enabled (default), just run avacado-cli!
+
+        Or manually:
+        1. Start AvocadoDB server: ./target/release/avocado-server (port 8765)
         2. Ingest documents: ./target/release/avocado ingest ./docs --recursive
-        3. Set AVOCADODB_URL (optional): export AVOCADODB_URL="http://localhost:8080"
+        3. Set AVOCADODB_URL (optional): export AVOCADODB_URL="http://localhost:8765"
 
     Example Response:
         "The authentication system uses JWT tokens (see auth.md:10-25). The token
@@ -82,7 +85,7 @@ def avocado_compile_context(
         import requests
 
         # Get server URL from environment or use default
-        server_url = os.environ.get("AVOCADODB_URL", "http://localhost:8080")
+        server_url = os.environ.get("AVOCADODB_URL", "http://localhost:8765")
 
         # Call AvocadoDB compile endpoint
         response = requests.post(
@@ -105,7 +108,7 @@ def avocado_compile_context(
                 "context": "",
                 "citations": [],
                 "query": query,
-                "hint": "Check if AvocadoDB server is running: ./target/release/avocado-server",
+                "hint": "Check if AvocadoDB server is running on port 8765",
             }
 
         data = response.json()
