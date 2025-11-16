@@ -128,13 +128,15 @@ The filesystem backend is currently operating in: `{Path.cwd()}`
         working_dir_section
         + """### Memory System Reminder
 
-**AVOCADODB-FIRST PROTOCOL:**
-For ANY questions about the codebase/documentation, use `avocado_compile_context` FIRST.
-Only use read_file/grep if AvocadoDB fails or you're editing files.
+**AVOCADODB-FIRST PROTOCOL (CRITICAL):**
+For codebase questions: Call ONLY `avocado_compile_context` - DO NOT call other tools in parallel!
+WAIT for results, then synthesize answer. AvocadoDB context is SUFFICIENT.
+Only use read_file/grep AFTER if results are insufficient.
 
-Your long-term agent memory is in /memories/ (for YOUR preferences, not codebase docs).
+DO NOT DO THIS: avocado_compile_context + ls + read_file (parallel) ❌
+DO THIS: avocado_compile_context → [wait] → synthesize answer ✅
 
-**Priority Order:** avocado_compile_context (codebase) → /memories/ (agent knowledge) → general knowledge
+/memories/ is for agent preferences only, not codebase docs.
 
 ### Human-in-the-Loop Tool Approval
 
