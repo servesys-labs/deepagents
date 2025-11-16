@@ -250,7 +250,7 @@ class AvocadoDBManager:
         if not self.binary_path:
             return
 
-        cwd = Path.cwd())
+        cwd = Path.cwd()
         print(f"🥑 Auto-ingesting {cwd}...")
 
         # Find ingest binary
