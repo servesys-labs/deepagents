@@ -388,7 +388,7 @@ def create_agent_with_config(
             "edit_file": edit_file_interrupt_config,
             "web_search": web_search_interrupt_config,
             "fetch_url": fetch_url_interrupt_config,
-            "avocado_compile_context": avocado_compile_context_interrupt_config,
+            # avocado_compile_context runs without approval (deterministic, read-only)
             "task": task_interrupt_config,
         },
     ).with_config(config)
