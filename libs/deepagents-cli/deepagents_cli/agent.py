@@ -22,6 +22,7 @@ from langgraph.runtime import Runtime
 
 from deepagents_cli._internal import ResumableShellToolMiddleware
 from deepagents_cli.agent_memory import AgentMemoryMiddleware
+from deepagents_cli.avocado_middleware import AvocadoDBExclusivityMiddleware
 from deepagents_cli.config import COLORS, config, console, get_default_coding_instructions
 
 
@@ -311,6 +312,7 @@ def create_agent_with_config(
 
         # Middleware: ResumableShellToolMiddleware provides "shell" tool
         agent_middleware = [
+            AvocadoDBExclusivityMiddleware(),  # Filter parallel tools when AvocadoDB is used
             AgentMemoryMiddleware(backend=long_term_backend, memory_path="/memories/"),
             ResumableShellToolMiddleware(
                 workspace_root=os.getcwd(), execution_policy=HostExecutionPolicy()
@@ -327,6 +329,7 @@ def create_agent_with_config(
         # Middleware: create_deep_agent automatically provides file tools + execute
         # when a SandboxBackend is passed, so we only add AgentMemoryMiddleware
         agent_middleware = [
+            AvocadoDBExclusivityMiddleware(),  # Filter parallel tools when AvocadoDB is used
             AgentMemoryMiddleware(backend=long_term_backend, memory_path="/memories/"),
         ]
         # NOTE: File operations (ls, read, write, edit, glob, grep) and execute tool
