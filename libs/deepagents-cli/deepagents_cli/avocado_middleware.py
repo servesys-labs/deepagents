@@ -38,10 +38,8 @@ class AvocadoDBExclusivityMiddleware(AgentMiddleware):
     def wrap_tool_call(self, tool_call: dict[str, Any], config: RunnableConfig) -> dict[str, Any]:
         """Intercept tool calls and block read tools when AvocadoDB is present.
 
-        This is called for EACH tool call before execution.
+        This is called for EACH tool call before execution (sync version).
         """
-        # First pass: check if avocado_compile_context is in this batch
-        # (This is a simplification - in reality we'd need to look at all pending calls)
         tool_name = tool_call.get("name", "")
 
         # If this is avocado_compile_context, mark it
@@ -53,11 +51,17 @@ class AvocadoDBExclusivityMiddleware(AgentMiddleware):
         if self._has_avocado_this_turn and tool_name in self.blocked_tools:
             if tool_name not in self._blocked_this_turn:
                 self._blocked_this_turn.append(tool_name)
-            # Return None or raise to skip this tool
-            # Actually, we can't skip easily here, so let's use a different approach
             return tool_call
 
         return tool_call
+
+    async def awrap_tool_call(self, tool_call: dict[str, Any], config: RunnableConfig) -> dict[str, Any]:
+        """Async version of wrap_tool_call.
+
+        This is called for EACH tool call before execution (async version).
+        """
+        # Just call the sync version since we don't need async operations
+        return self.wrap_tool_call(tool_call, config)
 
     async def __call__(
         self,
