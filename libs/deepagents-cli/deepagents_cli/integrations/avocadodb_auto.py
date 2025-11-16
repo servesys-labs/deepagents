@@ -219,19 +219,30 @@ class AvocadoDBManager:
             return
 
         try:
-            # Ingest common documentation paths
+            # Ingest documentation AND source code
             paths_to_ingest = []
 
-            for pattern in ["docs", "README.md", "*.md", "src"]:
-                matching = list(cwd.glob(pattern))
-                paths_to_ingest.extend(matching)
+            for pattern in [
+                "README.md",           # Main readme
+                "QUICKSTART.md",       # Quick start guide
+                "docs/**/*.md",        # Documentation
+                "**/src/**/*.rs",      # Rust source
+                "**/src/**/*.py",      # Python source
+                "**/src/**/*.ts",      # TypeScript source
+                "**/src/**/*.js",      # JavaScript source
+            ]:
+                try:
+                    matching = list(cwd.glob(pattern))
+                    paths_to_ingest.extend(matching[:50])  # Limit per pattern
+                except:
+                    pass
 
             if not paths_to_ingest:
                 print("   No documentation found to ingest")
                 return
 
-            # Ingest each path
-            for path in paths_to_ingest[:10]:  # Limit to 10 paths
+            # Ingest each path (limit to 100 files total)
+            for path in paths_to_ingest[:100]:
                 subprocess.run(
                     [str(ingest_binary), "ingest", str(path)],
                     capture_output=True,
