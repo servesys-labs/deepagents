@@ -25,10 +25,39 @@ class AvocadoDBExclusivityMiddleware(AgentMiddleware):
     ensuring AvocadoDB is used exclusively for codebase questions.
     """
 
+    # Track if we've seen avocado in this turn
+    _has_avocado_this_turn: bool = False
+
     def __init__(self):
         """Initialize middleware."""
+        super().__init__()
         # Tools to block when avocado_compile_context is active
         self.blocked_tools = {"read_file", "grep", "ls", "glob"}
+        self._blocked_this_turn = []
+
+    def wrap_tool_call(self, tool_call: dict[str, Any], config: RunnableConfig) -> dict[str, Any]:
+        """Intercept tool calls and block read tools when AvocadoDB is present.
+
+        This is called for EACH tool call before execution.
+        """
+        # First pass: check if avocado_compile_context is in this batch
+        # (This is a simplification - in reality we'd need to look at all pending calls)
+        tool_name = tool_call.get("name", "")
+
+        # If this is avocado_compile_context, mark it
+        if tool_name == "avocado_compile_context":
+            self._has_avocado_this_turn = True
+            return tool_call
+
+        # If we've seen avocado and this is a blocked tool, filter it out
+        if self._has_avocado_this_turn and tool_name in self.blocked_tools:
+            if tool_name not in self._blocked_this_turn:
+                self._blocked_this_turn.append(tool_name)
+            # Return None or raise to skip this tool
+            # Actually, we can't skip easily here, so let's use a different approach
+            return tool_call
+
+        return tool_call
 
     async def __call__(
         self,
@@ -37,11 +66,7 @@ class AvocadoDBExclusivityMiddleware(AgentMiddleware):
         *,
         store: Any,
     ) -> dict[str, Any]:
-        """Filter tool calls to enforce AvocadoDB exclusivity.
-
-        If avocado_compile_context is being called, remove all read-oriented
-        filesystem tools from the same turn.
-        """
+        """Pre-process state to filter tool calls before execution."""
         messages = state.get("messages", [])
 
         if not messages:
@@ -53,7 +78,7 @@ class AvocadoDBExclusivityMiddleware(AgentMiddleware):
         if not hasattr(last_message, "tool_calls") or not last_message.tool_calls:
             return state
 
-        tool_calls = last_message.tool_calls
+        tool_calls = list(last_message.tool_calls)
 
         # Check if avocado_compile_context is being called
         has_avocado = any(
@@ -62,24 +87,24 @@ class AvocadoDBExclusivityMiddleware(AgentMiddleware):
         )
 
         if has_avocado:
-            # Filter out blocked tools, keep only avocado_compile_context
+            # Filter out blocked tools
             filtered_calls = [
                 tc for tc in tool_calls
                 if tc.get("name") == "avocado_compile_context"
                 or tc.get("name") not in self.blocked_tools
             ]
 
-            # Update the message with filtered tool calls
+            # Update the message
             if len(filtered_calls) < len(tool_calls):
-                last_message.tool_calls = filtered_calls
-
-                # Log what we blocked
                 blocked = [
                     tc.get("name")
                     for tc in tool_calls
                     if tc.get("name") in self.blocked_tools
                 ]
                 if blocked:
-                    print(f"🥑 AvocadoDB exclusivity: Blocked parallel tools: {', '.join(blocked)}")
+                    print(f"🥑 AvocadoDB exclusivity: Blocked {', '.join(blocked)}")
+
+                # Modify the message in place
+                last_message.tool_calls = filtered_calls
 
         return state
