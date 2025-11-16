@@ -212,6 +212,7 @@ async def execute_task(
         "execute": "🔧",
         "web_search": "🌐",
         "http_request": "🌍",
+        "avocado_compile_context": "🥑",
         "task": "🤖",
         "write_todos": "📋",
     }

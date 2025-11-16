@@ -218,6 +218,20 @@ def _format_fetch_url_description(tool_call: ToolCall, state: AgentState, runtim
     return f"URL: {url}\nTimeout: {timeout}s\n\n⚠️  Will fetch and convert web content to markdown"
 
 
+def _format_avocado_compile_context_description(tool_call: ToolCall, state: AgentState, runtime: Runtime) -> str:
+    """Format avocado_compile_context tool call for approval prompt."""
+    args = tool_call["args"]
+    query = args.get("query", "unknown")
+    token_budget = args.get("token_budget", 8000)
+
+    return (
+        f"Query: {query}\n"
+        f"Token budget: {token_budget}\n\n"
+        f"✅ Deterministic retrieval (same query → same context)\n"
+        f"⚠️  Requires AvocadoDB server running on localhost:8080"
+    )
+
+
 def _format_task_description(tool_call: ToolCall, state: AgentState, runtime: Runtime) -> str:
     """Format task (subagent) tool call for approval prompt."""
     args = tool_call["args"]
@@ -352,6 +366,11 @@ def create_agent_with_config(
         "description": _format_fetch_url_description,
     }
 
+    avocado_compile_context_interrupt_config: InterruptOnConfig = {
+        "allowed_decisions": ["approve", "reject"],
+        "description": _format_avocado_compile_context_description,
+    }
+
     task_interrupt_config: InterruptOnConfig = {
         "allowed_decisions": ["approve", "reject"],
         "description": _format_task_description,
@@ -370,6 +389,7 @@ def create_agent_with_config(
             "edit_file": edit_file_interrupt_config,
             "web_search": web_search_interrupt_config,
             "fetch_url": fetch_url_interrupt_config,
+            "avocado_compile_context": avocado_compile_context_interrupt_config,
             "task": task_interrupt_config,
         },
     ).with_config(config)

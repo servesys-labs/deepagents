@@ -16,7 +16,13 @@ from deepagents_cli.integrations.sandbox_factory import (
     create_sandbox,
     get_default_working_dir,
 )
-from deepagents_cli.tools import fetch_url, http_request, tavily_client, web_search
+from deepagents_cli.tools import (
+    avocado_compile_context,
+    fetch_url,
+    http_request,
+    tavily_client,
+    web_search,
+)
 from deepagents_cli.ui import TokenTracker, show_help
 
 
@@ -253,7 +259,7 @@ async def _run_agent_session(
         setup_script_path: Path to setup script that was run (if any)
     """
     # Create agent with conditional tools
-    tools = [http_request, fetch_url]
+    tools = [http_request, fetch_url, avocado_compile_context]
     if tavily_client is not None:
         tools.append(web_search)
 

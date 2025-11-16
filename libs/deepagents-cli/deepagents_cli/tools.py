@@ -7,6 +7,8 @@ import requests
 from markdownify import markdownify
 from tavily import TavilyClient
 
+from deepagents_cli.integrations.avocadodb import avocado_compile_context
+
 # Initialize Tavily client if API key is available
 tavily_client = (
     TavilyClient(api_key=os.environ.get("TAVILY_API_KEY"))
