@@ -243,40 +243,6 @@ class AvocadoDBManager:
         except Exception as e:
             print(f"   Auto-ingest error: {e}")
 
-
-# Global instance
-_manager: Optional[AvocadoDBManager] = None
-
-
-def get_manager() -> AvocadoDBManager:
-    """Get or create global AvocadoDB manager instance."""
-    global _manager
-    if _manager is None:
-        # Auto-start ENABLED by default (can disable with AVOCADODB_AUTO_START=false)
-        auto_start = os.environ.get("AVOCADODB_AUTO_START", "true").lower() == "true"
-        _manager = AvocadoDBManager(auto_start=auto_start, auto_ingest=auto_start)
-
-    return _manager
-
-
-def ensure_running() -> bool:
-    """Ensure AvocadoDB server is running.
-
-    Returns:
-        True if server is available
-    """
-    manager = get_manager()
-
-    if manager.is_running():
-        return True
-
-    if manager.auto_start:
-        return manager.start_server()
-
-    return False
-
-
-__all__ = ["AvocadoDBManager", "get_manager", "ensure_running"]
     def _background_ingest_loop(self):
         """Background thread that periodically re-ingests changed files."""
         cwd = Path.cwd()
@@ -296,7 +262,7 @@ __all__ = ["AvocadoDBManager", "get_manager", "ensure_running"]
 
                 # Find files matching our patterns
                 paths_to_check = []
-                for pattern in ["docs/**/*.md", "**/ README.md", "*.md", "src/**/*.py", "src/**/*.ts", "src/**/*.js"]:
+                for pattern in ["docs/**/*.md", "README.md", "*.md", "src/**/*.py", "src/**/*.ts", "src/**/*.js"]:
                     try:
                         matching = list(cwd.glob(pattern))
                         paths_to_check.extend(matching[:50])  # Limit to prevent too many files
@@ -347,3 +313,38 @@ __all__ = ["AvocadoDBManager", "get_manager", "ensure_running"]
             self._stop_ingest.set()
             self._ingest_thread.join(timeout=2)
             self._ingest_thread = None
+
+
+# Global instance
+_manager: Optional[AvocadoDBManager] = None
+
+
+def get_manager() -> AvocadoDBManager:
+    """Get or create global AvocadoDB manager instance."""
+    global _manager
+    if _manager is None:
+        # Auto-start ENABLED by default (can disable with AVOCADODB_AUTO_START=false)
+        auto_start = os.environ.get("AVOCADODB_AUTO_START", "true").lower() == "true"
+        _manager = AvocadoDBManager(auto_start=auto_start, auto_ingest=auto_start)
+
+    return _manager
+
+
+def ensure_running() -> bool:
+    """Ensure AvocadoDB server is running.
+
+    Returns:
+        True if server is available
+    """
+    manager = get_manager()
+
+    if manager.is_running():
+        return True
+
+    if manager.auto_start:
+        return manager.start_server()
+
+    return False
+
+
+__all__ = ["AvocadoDBManager", "get_manager", "ensure_running"]
