@@ -35,12 +35,16 @@ class AvocadoDBExclusivityMiddleware(AgentMiddleware):
         self.blocked_tools = {"read_file", "grep", "ls", "glob"}
         self._blocked_this_turn = []
 
-    def wrap_tool_call(self, tool_call: dict[str, Any], config: RunnableConfig) -> dict[str, Any]:
+    def wrap_tool_call(self, tool_call: Any, config: RunnableConfig) -> Any:
         """Intercept tool calls and block read tools when AvocadoDB is present.
 
         This is called for EACH tool call before execution (sync version).
         """
-        tool_name = tool_call.get("name", "")
+        # Handle both dict and object-style tool calls
+        if isinstance(tool_call, dict):
+            tool_name = tool_call.get("name", "")
+        else:
+            tool_name = getattr(tool_call, "name", "")
 
         # If this is avocado_compile_context, mark it
         if tool_name == "avocado_compile_context":
@@ -55,7 +59,7 @@ class AvocadoDBExclusivityMiddleware(AgentMiddleware):
 
         return tool_call
 
-    async def awrap_tool_call(self, tool_call: dict[str, Any], config: RunnableConfig) -> dict[str, Any]:
+    async def awrap_tool_call(self, tool_call: Any, config: RunnableConfig) -> Any:
         """Async version of wrap_tool_call.
 
         This is called for EACH tool call before execution (async version).
