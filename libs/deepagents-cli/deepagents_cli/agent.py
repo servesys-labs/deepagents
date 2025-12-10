@@ -9,7 +9,6 @@ from deepagents.backends import CompositeBackend
 from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.backends.sandbox import SandboxBackendProtocol
 from langchain.agents.middleware import (
-    HostExecutionPolicy,
     InterruptOnConfig,
 )
 from langchain.agents.middleware.types import AgentState
@@ -20,15 +19,16 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.pregel import Pregel
 from langgraph.runtime import Runtime
 
-from deepagents_cli._internal import ResumableShellToolMiddleware
 from deepagents_cli.agent_memory import AgentMemoryMiddleware
-from deepagents_cli.avocado_middleware import AvocadoDBExclusivityMiddleware
-from deepagents_cli.config import COLORS, config, console, get_default_coding_instructions
+from deepagents_cli.config import COLORS, config, console, get_default_coding_instructions, settings
+from deepagents_cli.integrations.sandbox_factory import get_default_working_dir
+from deepagents_cli.shell import ShellMiddleware
+from deepagents_cli.skills import SkillsMiddleware
 
 
 def list_agents() -> None:
     """List all available agents."""
-    agents_dir = Path.home() / ".deepagents"
+    agents_dir = settings.user_deepagents_dir
 
     if not agents_dir.exists() or not any(agents_dir.iterdir()):
         console.print("[yellow]No agents found.[/yellow]")
@@ -59,7 +59,7 @@ def list_agents() -> None:
 
 def reset_agent(agent_name: str, source_agent: str | None = None) -> None:
     """Reset an agent to default or copy from another agent."""
-    agents_dir = Path.home() / ".deepagents"
+    agents_dir = settings.user_deepagents_dir
     agent_dir = agents_dir / agent_name
 
     if source_agent:
@@ -68,7 +68,8 @@ def reset_agent(agent_name: str, source_agent: str | None = None) -> None:
 
         if not source_md.exists():
             console.print(
-                f"[bold red]Error:[/bold red] Source agent '{source_agent}' not found or has no agent.md"
+                f"[bold red]Error:[/bold red] Source agent '{source_agent}' not found "
+                "or has no agent.md"
             )
             return
 
@@ -90,19 +91,21 @@ def reset_agent(agent_name: str, source_agent: str | None = None) -> None:
     console.print(f"Location: {agent_dir}\n", style=COLORS["dim"])
 
 
-def get_system_prompt(sandbox_type: str | None = None) -> str:
+def get_system_prompt(assistant_id: str, sandbox_type: str | None = None) -> str:
     """Get the base system prompt for the agent.
 
     Args:
+        assistant_id: The agent identifier for path references
         sandbox_type: Type of sandbox provider ("modal", "runloop", "daytona").
                      If None, agent is operating in local mode.
 
     Returns:
         The system prompt string (without agent.md content)
     """
+    agent_dir_path = f"~/.deepagents/{assistant_id}"
+
     if sandbox_type:
         # Get provider-specific working directory
-        from deepagents_cli.integrations.sandbox_factory import get_default_working_dir
 
         working_dir = get_default_working_dir(sandbox_type)
 
@@ -115,29 +118,35 @@ All code execution and file operations happen in this sandbox environment.
 **Important:**
 - The CLI is running locally on the user's machine, but you execute code remotely
 - Use `{working_dir}` as your working directory for all operations
-- The local `/memories/` directory is still accessible for persistent storage
 
 """
     else:
-        working_dir_section = f"""### Current Working Directory
+        cwd = Path.cwd()
+        working_dir_section = f"""<env>
+Working directory: {cwd}
+</env>
 
-The filesystem backend is currently operating in: `{Path.cwd()}`
+### Current Working Directory
+
+The filesystem backend is currently operating in: `{cwd}`
+
+### File System and Paths
+
+**IMPORTANT - Path Handling:**
+- All file paths must be absolute paths (e.g., `{cwd}/file.txt`)
+- Use the working directory from <env> to construct absolute paths
+- Example: To create a file in your working directory, use `{cwd}/research_project/file.md`
+- Never use relative paths - always construct full absolute paths
 
 """
 
     return (
         working_dir_section
-        + """### Memory System Reminder
+        + f"""### Skills Directory
 
-**AVOCADODB-FIRST PROTOCOL (CRITICAL):**
-For codebase questions: Call ONLY `avocado_compile_context` - DO NOT call other tools in parallel!
-WAIT for results, then synthesize answer. AvocadoDB context is SUFFICIENT.
-Only use read_file/grep AFTER if results are insufficient.
-
-DO NOT DO THIS: avocado_compile_context + ls + read_file (parallel) ❌
-DO THIS: avocado_compile_context → [wait] → synthesize answer ✅
-
-/memories/ is for agent preferences only, not codebase docs.
+Your skills are stored at: `{agent_dir_path}/skills/`
+Skills may contain scripts or supporting files. When executing skill scripts with bash, use the real filesystem path:
+Example: `bash python {agent_dir_path}/skills/web-research/script.py`
 
 ### Human-in-the-Loop Tool Approval
 
@@ -178,19 +187,23 @@ The todo list is a planning tool - use it judiciously to avoid overwhelming the 
     )
 
 
-def _format_write_file_description(tool_call: ToolCall, state: AgentState, runtime: Runtime) -> str:
+def _format_write_file_description(
+    tool_call: ToolCall, _state: AgentState, _runtime: Runtime
+) -> str:
     """Format write_file tool call for approval prompt."""
     args = tool_call["args"]
     file_path = args.get("file_path", "unknown")
     content = args.get("content", "")
 
-    action = "Overwrite" if os.path.exists(file_path) else "Create"
+    action = "Overwrite" if Path(file_path).exists() else "Create"
     line_count = len(content.splitlines())
 
     return f"File: {file_path}\nAction: {action} file\nLines: {line_count}"
 
 
-def _format_edit_file_description(tool_call: ToolCall, state: AgentState, runtime: Runtime) -> str:
+def _format_edit_file_description(
+    tool_call: ToolCall, _state: AgentState, _runtime: Runtime
+) -> str:
     """Format edit_file tool call for approval prompt."""
     args = tool_call["args"]
     file_path = args.get("file_path", "unknown")
@@ -202,7 +215,9 @@ def _format_edit_file_description(tool_call: ToolCall, state: AgentState, runtim
     )
 
 
-def _format_web_search_description(tool_call: ToolCall, state: AgentState, runtime: Runtime) -> str:
+def _format_web_search_description(
+    tool_call: ToolCall, _state: AgentState, _runtime: Runtime
+) -> str:
     """Format web_search tool call for approval prompt."""
     args = tool_call["args"]
     query = args.get("query", "unknown")
@@ -211,7 +226,9 @@ def _format_web_search_description(tool_call: ToolCall, state: AgentState, runti
     return f"Query: {query}\nMax results: {max_results}\n\n⚠️  This will use Tavily API credits"
 
 
-def _format_fetch_url_description(tool_call: ToolCall, state: AgentState, runtime: Runtime) -> str:
+def _format_fetch_url_description(
+    tool_call: ToolCall, _state: AgentState, _runtime: Runtime
+) -> str:
     """Format fetch_url tool call for approval prompt."""
     args = tool_call["args"]
     url = args.get("url", "unknown")
@@ -220,126 +237,47 @@ def _format_fetch_url_description(tool_call: ToolCall, state: AgentState, runtim
     return f"URL: {url}\nTimeout: {timeout}s\n\n⚠️  Will fetch and convert web content to markdown"
 
 
-def _format_avocado_compile_context_description(tool_call: ToolCall, state: AgentState, runtime: Runtime) -> str:
-    """Format avocado_compile_context tool call for approval prompt."""
-    args = tool_call["args"]
-    query = args.get("query", "unknown")
-    token_budget = args.get("token_budget", 8000)
+def _format_task_description(tool_call: ToolCall, _state: AgentState, _runtime: Runtime) -> str:
+    """Format task (subagent) tool call for approval prompt.
 
-    return (
-        f"Query: {query}\n"
-        f"Token budget: {token_budget}\n\n"
-        f"✅ Deterministic retrieval (same query → same context)\n"
-        f"✅ Auto-starts on port 8765 (or set AVOCADODB_URL)"
-    )
-
-
-def _format_task_description(tool_call: ToolCall, state: AgentState, runtime: Runtime) -> str:
-    """Format task (subagent) tool call for approval prompt."""
+    The task tool signature is: task(description: str, subagent_type: str)
+    The description contains all instructions that will be sent to the subagent.
+    """
     args = tool_call["args"]
     description = args.get("description", "unknown")
-    prompt = args.get("prompt", "")
+    subagent_type = args.get("subagent_type", "unknown")
 
-    # Truncate prompt if too long
-    prompt_preview = prompt[:300]
-    if len(prompt) > 300:
-        prompt_preview += "..."
+    # Truncate description if too long for display
+    description_preview = description
+    if len(description) > 500:
+        description_preview = description[:500] + "..."
 
     return (
-        f"Task: {description}\n\n"
-        f"Instructions to subagent:\n"
+        f"Subagent Type: {subagent_type}\n\n"
+        f"Task Instructions:\n"
         f"{'─' * 40}\n"
-        f"{prompt_preview}\n"
+        f"{description_preview}\n"
         f"{'─' * 40}\n\n"
         f"⚠️  Subagent will have access to file operations and shell commands"
     )
 
 
-def _format_shell_description(tool_call: ToolCall, state: AgentState, runtime: Runtime) -> str:
+def _format_shell_description(tool_call: ToolCall, _state: AgentState, _runtime: Runtime) -> str:
     """Format shell tool call for approval prompt."""
     args = tool_call["args"]
     command = args.get("command", "N/A")
-    return f"Shell Command: {command}\nWorking Directory: {os.getcwd()}"
+    return f"Shell Command: {command}\nWorking Directory: {Path.cwd()}"
 
 
-def _format_execute_description(tool_call: ToolCall, state: AgentState, runtime: Runtime) -> str:
+def _format_execute_description(tool_call: ToolCall, _state: AgentState, _runtime: Runtime) -> str:
     """Format execute tool call for approval prompt."""
     args = tool_call["args"]
     command = args.get("command", "N/A")
     return f"Execute Command: {command}\nLocation: Remote Sandbox"
 
 
-def create_agent_with_config(
-    model: str | BaseChatModel,
-    assistant_id: str,
-    tools: list[BaseTool],
-    *,
-    sandbox: SandboxBackendProtocol | None = None,
-    sandbox_type: str | None = None,
-) -> tuple[Pregel, CompositeBackend]:
-    """Create and configure an agent with the specified model and tools.
-
-    Args:
-        model: LLM model to use
-        assistant_id: Agent identifier for memory storage
-        tools: Additional tools to provide to agent
-        sandbox: Optional sandbox backend for remote execution (e.g., ModalBackend).
-                 If None, uses local filesystem + shell.
-        sandbox_type: Type of sandbox provider ("modal", "runloop", "daytona")
-
-    Returns:
-        2-tuple of graph and backend
-    """
-    # Setup agent directory for persistent memory (same for both local and remote modes)
-    agent_dir = Path.home() / ".deepagents" / assistant_id
-    agent_dir.mkdir(parents=True, exist_ok=True)
-    agent_md = agent_dir / "agent.md"
-    if not agent_md.exists():
-        source_content = get_default_coding_instructions()
-        agent_md.write_text(source_content)
-
-    # Long-term backend for /memories/ route (always local, persists across sessions)
-    long_term_backend = FilesystemBackend(root_dir=agent_dir, virtual_mode=True)
-
-    # CONDITIONAL SETUP: Local vs Remote Sandbox
-    if sandbox is None:
-        # ========== LOCAL MODE (current behavior) ==========
-        # Backend: Local filesystem for code + local /memories/
-        composite_backend = CompositeBackend(
-            default=FilesystemBackend(),  # Current working directory
-            routes={"/memories/": long_term_backend},  # Agent memories
-        )
-
-        # Middleware: ResumableShellToolMiddleware provides "shell" tool
-        agent_middleware = [
-            AvocadoDBExclusivityMiddleware(),  # Filter parallel tools when AvocadoDB is used
-            AgentMemoryMiddleware(backend=long_term_backend, memory_path="/memories/"),
-            ResumableShellToolMiddleware(
-                workspace_root=os.getcwd(), execution_policy=HostExecutionPolicy()
-            ),
-        ]
-    else:
-        # ========== REMOTE SANDBOX MODE ==========
-        # Backend: Remote sandbox for code + local /memories/
-        composite_backend = CompositeBackend(
-            default=sandbox,  # Remote sandbox (ModalBackend, etc.)
-            routes={"/memories/": long_term_backend},  # Agent memories (still local!)
-        )
-
-        # Middleware: create_deep_agent automatically provides file tools + execute
-        # when a SandboxBackend is passed, so we only add AgentMemoryMiddleware
-        agent_middleware = [
-            AvocadoDBExclusivityMiddleware(),  # Filter parallel tools when AvocadoDB is used
-            AgentMemoryMiddleware(backend=long_term_backend, memory_path="/memories/"),
-        ]
-        # NOTE: File operations (ls, read, write, edit, glob, grep) and execute tool
-        # are automatically provided by create_deep_agent when backend is a SandboxBackend.
-        # No need to add FilesystemMiddleware or ShellToolMiddleware manually.
-
-    # Get the system prompt (sandbox-aware)
-    system_prompt = get_system_prompt(sandbox_type=sandbox_type)
-
-    # Configure human-in-the-loop for potentially destructive tools
+def _add_interrupt_on() -> dict[str, InterruptOnConfig]:
+    """Configure human-in-the-loop interrupt_on settings for destructive tools."""
     shell_interrupt_config: InterruptOnConfig = {
         "allowed_decisions": ["approve", "reject"],
         "description": _format_shell_description,
@@ -370,34 +308,159 @@ def create_agent_with_config(
         "description": _format_fetch_url_description,
     }
 
-    avocado_compile_context_interrupt_config: InterruptOnConfig = {
-        "allowed_decisions": ["approve", "reject"],
-        "description": _format_avocado_compile_context_description,
-    }
-
     task_interrupt_config: InterruptOnConfig = {
         "allowed_decisions": ["approve", "reject"],
         "description": _format_task_description,
     }
+    return {
+        "shell": shell_interrupt_config,
+        "execute": execute_interrupt_config,
+        "write_file": write_file_interrupt_config,
+        "edit_file": edit_file_interrupt_config,
+        "web_search": web_search_interrupt_config,
+        "fetch_url": fetch_url_interrupt_config,
+        "task": task_interrupt_config,
+    }
 
+
+def create_cli_agent(
+    model: str | BaseChatModel,
+    assistant_id: str,
+    *,
+    tools: list[BaseTool] | None = None,
+    sandbox: SandboxBackendProtocol | None = None,
+    sandbox_type: str | None = None,
+    system_prompt: str | None = None,
+    auto_approve: bool = False,
+    enable_memory: bool = True,
+    enable_skills: bool = True,
+    enable_shell: bool = True,
+) -> tuple[Pregel, CompositeBackend]:
+    """Create a CLI-configured agent with flexible options.
+
+    This is the main entry point for creating a deepagents CLI agent, usable both
+    internally and from external code (e.g., benchmarking frameworks, Harbor).
+
+    Args:
+        model: LLM model to use (e.g., "anthropic:claude-sonnet-4-5-20250929")
+        assistant_id: Agent identifier for memory/state storage
+        tools: Additional tools to provide to agent (default: empty list)
+        sandbox: Optional sandbox backend for remote execution (e.g., ModalBackend).
+                 If None, uses local filesystem + shell.
+        sandbox_type: Type of sandbox provider ("modal", "runloop", "daytona").
+                     Used for system prompt generation.
+        system_prompt: Override the default system prompt. If None, generates one
+                      based on sandbox_type and assistant_id.
+        auto_approve: If True, automatically approves all tool calls without human
+                     confirmation. Useful for automated workflows.
+        enable_memory: Enable AgentMemoryMiddleware for persistent memory
+        enable_skills: Enable SkillsMiddleware for custom agent skills
+        enable_shell: Enable ShellMiddleware for local shell execution (only in local mode)
+
+    Returns:
+        2-tuple of (agent_graph, composite_backend)
+        - agent_graph: Configured LangGraph Pregel instance ready for execution
+        - composite_backend: CompositeBackend for file operations
+    """
+    if tools is None:
+        tools = []
+
+    # Setup agent directory for persistent memory (if enabled)
+    if enable_memory or enable_skills:
+        agent_dir = settings.ensure_agent_dir(assistant_id)
+        agent_md = agent_dir / "agent.md"
+        if not agent_md.exists():
+            source_content = get_default_coding_instructions()
+            agent_md.write_text(source_content)
+
+    # Skills directories (if enabled)
+    skills_dir = None
+    project_skills_dir = None
+    if enable_skills:
+        skills_dir = settings.ensure_user_skills_dir(assistant_id)
+        project_skills_dir = settings.get_project_skills_dir()
+
+    # Build middleware stack based on enabled features
+    agent_middleware = []
+
+    # CONDITIONAL SETUP: Local vs Remote Sandbox
+    if sandbox is None:
+        # ========== LOCAL MODE ==========
+        composite_backend = CompositeBackend(
+            default=FilesystemBackend(),  # Current working directory
+            routes={},  # No virtualization - use real paths
+        )
+
+        # Add memory middleware
+        if enable_memory:
+            agent_middleware.append(
+                AgentMemoryMiddleware(settings=settings, assistant_id=assistant_id)
+            )
+
+        # Add skills middleware
+        if enable_skills:
+            agent_middleware.append(
+                SkillsMiddleware(
+                    skills_dir=skills_dir,
+                    assistant_id=assistant_id,
+                    project_skills_dir=project_skills_dir,
+                )
+            )
+
+        # Add shell middleware (only in local mode)
+        if enable_shell:
+            agent_middleware.append(
+                ShellMiddleware(
+                    workspace_root=str(Path.cwd()),
+                    env=os.environ,
+                )
+            )
+    else:
+        # ========== REMOTE SANDBOX MODE ==========
+        composite_backend = CompositeBackend(
+            default=sandbox,  # Remote sandbox (ModalBackend, etc.)
+            routes={},  # No virtualization
+        )
+
+        # Add memory middleware
+        if enable_memory:
+            agent_middleware.append(
+                AgentMemoryMiddleware(settings=settings, assistant_id=assistant_id)
+            )
+
+        # Add skills middleware
+        if enable_skills:
+            agent_middleware.append(
+                SkillsMiddleware(
+                    skills_dir=skills_dir,
+                    assistant_id=assistant_id,
+                    project_skills_dir=project_skills_dir,
+                )
+            )
+
+        # Note: Shell middleware not used in sandbox mode
+        # File operations and execute tool are provided by the sandbox backend
+
+    # Get or use custom system prompt
+    if system_prompt is None:
+        system_prompt = get_system_prompt(assistant_id=assistant_id, sandbox_type=sandbox_type)
+
+    # Configure interrupt_on based on auto_approve setting
+    if auto_approve:
+        # No interrupts - all tools run automatically
+        interrupt_on = {}
+    else:
+        # Full HITL for destructive operations
+        interrupt_on = _add_interrupt_on()
+
+    # Create the agent
     agent = create_deep_agent(
         model=model,
         system_prompt=system_prompt,
         tools=tools,
         backend=composite_backend,
         middleware=agent_middleware,
-        interrupt_on={
-            "shell": shell_interrupt_config,
-            "execute": execute_interrupt_config,
-            "write_file": write_file_interrupt_config,
-            "edit_file": edit_file_interrupt_config,
-            "web_search": web_search_interrupt_config,
-            "fetch_url": fetch_url_interrupt_config,
-            # avocado_compile_context runs without approval (deterministic, read-only)
-            "task": task_interrupt_config,
-        },
+        interrupt_on=interrupt_on,
+        checkpointer=InMemorySaver(),
     ).with_config(config)
-
-    agent.checkpointer = InMemorySaver()
-
     return agent, composite_backend

@@ -2,27 +2,30 @@
 
 import argparse
 import asyncio
+import os
 import sys
 from pathlib import Path
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 
-from deepagents_cli.agent import create_agent_with_config, list_agents, reset_agent
+from deepagents_cli.agent import create_cli_agent, list_agents, reset_agent
 from deepagents_cli.commands import execute_bash_command, handle_command
-from deepagents_cli.config import COLORS, DEEP_AGENTS_ASCII, SessionState, console, create_model
+from deepagents_cli.config import (
+    COLORS,
+    DEEP_AGENTS_ASCII,
+    SessionState,
+    console,
+    create_model,
+    settings,
+)
 from deepagents_cli.execution import execute_task
 from deepagents_cli.input import create_prompt_session
 from deepagents_cli.integrations.sandbox_factory import (
     create_sandbox,
     get_default_working_dir,
 )
-from deepagents_cli.tools import (
-    avocado_compile_context,
-    fetch_url,
-    http_request,
-    tavily_client,
-    web_search,
-)
+from deepagents_cli.skills import execute_skills_command, setup_skills_parser
+from deepagents_cli.tools import fetch_url, http_request, web_search
 from deepagents_cli.ui import TokenTracker, show_help
 
 
@@ -90,6 +93,9 @@ def parse_args():
         "--target", dest="source_agent", help="Copy prompt from another agent"
     )
 
+    # Skills command - setup delegated to skills module
+    setup_skills_parser(subparsers)
+
     # Default interactive mode
     parser.add_argument(
         "--agent",
@@ -115,6 +121,11 @@ def parse_args():
         "--sandbox-setup",
         help="Path to setup script to run in sandbox after creation",
     )
+    parser.add_argument(
+        "--no-splash",
+        action="store_true",
+        help="Disable the startup splash screen",
+    )
 
     return parser.parse_args()
 
@@ -127,7 +138,8 @@ async def simple_cli(
     backend=None,
     sandbox_type: str | None = None,
     setup_script_path: str | None = None,
-):
+    no_splash: bool = False,
+) -> None:
     """Main CLI loop.
 
     Args:
@@ -136,15 +148,24 @@ async def simple_cli(
                      If None, running in local mode.
         sandbox_id: ID of the active sandbox
         setup_script_path: Path to setup script that was run (if any)
+        no_splash: If True, skip displaying the startup splash screen
     """
     console.clear()
-    console.print(DEEP_AGENTS_ASCII, style=f"bold {COLORS['primary']}")
-    console.print()
+    if not no_splash:
+        console.print(DEEP_AGENTS_ASCII, style=f"bold {COLORS['primary']}")
+        console.print()
 
-    if backend and isinstance(backend, SandboxBackendProtocol):
-        sandbox_id: str | None = backend.id
-    else:
-        sandbox_id = None
+    # Extract sandbox ID from backend if using sandbox mode
+    sandbox_id: str | None = None
+    if backend:
+        from deepagents.backends.composite import CompositeBackend
+
+        # Check if it's a CompositeBackend with a sandbox default backend
+        if isinstance(backend, CompositeBackend):
+            if isinstance(backend.default, SandboxBackendProtocol):
+                sandbox_id = backend.default.id
+        elif isinstance(backend, SandboxBackendProtocol):
+            sandbox_id = backend.id
 
     # Display sandbox info persistently (survives console.clear())
     if sandbox_type and sandbox_id:
@@ -155,7 +176,7 @@ async def simple_cli(
             )
         console.print()
 
-    if tavily_client is None:
+    if not settings.has_tavily:
         console.print(
             "[yellow]⚠ Web search disabled:[/yellow] TAVILY_API_KEY not found.",
             style=COLORS["dim"],
@@ -185,10 +206,19 @@ async def simple_cli(
         )
         console.print()
 
-    console.print(
-        "  Tips: Enter to submit, Alt+Enter for newline, Ctrl+E for editor, Ctrl+T to toggle auto-approve, Ctrl+C to interrupt",
-        style=f"dim {COLORS['dim']}",
-    )
+    # Localize modifier names and show key symbols (macOS vs others)
+    if sys.platform == "darwin":
+        tips = (
+            "  Tips: ⏎ Enter to submit, ⌥ Option + ⏎ Enter for newline (or Esc+Enter), "
+            "⌃E to open editor, ⌃T to toggle auto-approve, ⌃C to interrupt"
+        )
+    else:
+        tips = (
+            "  Tips: Enter to submit, Alt+Enter (or Esc+Enter) for newline, "
+            "Ctrl+E to open editor, Ctrl+T to toggle auto-approve, Ctrl+C to interrupt"
+        )
+    console.print(tips, style=f"dim {COLORS['dim']}")
+
     console.print()
 
     # Create prompt session and token tracker
@@ -245,7 +275,7 @@ async def _run_agent_session(
     sandbox_backend=None,
     sandbox_type: str | None = None,
     setup_script_path: str | None = None,
-):
+) -> None:
     """Helper to create agent and run CLI session.
 
     Extracted to avoid duplication between sandbox and local modes.
@@ -259,21 +289,26 @@ async def _run_agent_session(
         setup_script_path: Path to setup script that was run (if any)
     """
     # Create agent with conditional tools
-    tools = [http_request, fetch_url, avocado_compile_context]
-    if tavily_client is not None:
+    tools = [http_request, fetch_url]
+    if settings.has_tavily:
         tools.append(web_search)
 
-    agent, composite_backend = create_agent_with_config(
-        model, assistant_id, tools, sandbox=sandbox_backend, sandbox_type=sandbox_type
+    agent, composite_backend = create_cli_agent(
+        model=model,
+        assistant_id=assistant_id,
+        tools=tools,
+        sandbox=sandbox_backend,
+        sandbox_type=sandbox_type,
+        auto_approve=session_state.auto_approve,
     )
 
     # Calculate baseline token count for accurate token tracking
     from .agent import get_system_prompt
     from .token_utils import calculate_baseline_tokens
 
-    agent_dir = Path.home() / ".deepagents" / assistant_id
-    system_prompt = get_system_prompt(sandbox_type=sandbox_type)
-    baseline_tokens = calculate_baseline_tokens(model, agent_dir, system_prompt)
+    agent_dir = settings.get_agent_dir(assistant_id)
+    system_prompt = get_system_prompt(assistant_id=assistant_id, sandbox_type=sandbox_type)
+    baseline_tokens = calculate_baseline_tokens(model, agent_dir, system_prompt, assistant_id)
 
     await simple_cli(
         agent,
@@ -283,6 +318,7 @@ async def _run_agent_session(
         backend=composite_backend,
         sandbox_type=sandbox_type,
         setup_script_path=setup_script_path,
+        no_splash=session_state.no_splash,
     )
 
 
@@ -292,7 +328,7 @@ async def main(
     sandbox_type: str = "none",
     sandbox_id: str | None = None,
     setup_script_path: str | None = None,
-):
+) -> None:
     """Main entry point with conditional sandbox support.
 
     Args:
@@ -352,6 +388,11 @@ async def main(
 
 def cli_main() -> None:
     """Entry point for console script."""
+    # Fix for gRPC fork issue on macOS
+    # https://github.com/grpc/grpc/issues/37642
+    if sys.platform == "darwin":
+        os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "0"
+
     # Check dependencies first
     check_cli_dependencies()
 
@@ -364,9 +405,11 @@ def cli_main() -> None:
             list_agents()
         elif args.command == "reset":
             reset_agent(args.agent, args.source_agent)
+        elif args.command == "skills":
+            execute_skills_command(args)
         else:
             # Create session state from args
-            session_state = SessionState(auto_approve=args.auto_approve)
+            session_state = SessionState(auto_approve=args.auto_approve, no_splash=args.no_splash)
 
             # API key validation happens in create_model()
             asyncio.run(

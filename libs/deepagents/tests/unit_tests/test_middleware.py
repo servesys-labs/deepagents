@@ -11,6 +11,7 @@ from langgraph.store.memory import InMemoryStore
 from langgraph.types import Overwrite
 
 from deepagents.backends import CompositeBackend, StateBackend, StoreBackend
+from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 from deepagents.backends.utils import create_file_data, truncate_if_too_long, update_file_data
 from deepagents.middleware.filesystem import FileData, FilesystemMiddleware, FilesystemState
 from deepagents.middleware.patch_tool_calls import PatchToolCallsMiddleware
@@ -123,7 +124,7 @@ class TestFilesystemMiddleware:
         result = ls_tool.invoke(
             {"runtime": ToolRuntime(state=state, context=None, tool_call_id="", store=None, stream_writer=lambda _: None, config={}), "path": "/"}
         )
-        assert result == ["/test.txt", "/test2.txt"]
+        assert result == str(["/test.txt", "/test2.txt"])
 
     def test_ls_shortterm_with_path(self):
         state = FilesystemState(
@@ -153,12 +154,13 @@ class TestFilesystemMiddleware:
         )
         middleware = FilesystemMiddleware()
         ls_tool = next(tool for tool in middleware.tools if tool.name == "ls")
-        result = ls_tool.invoke(
+        result_raw = ls_tool.invoke(
             {
                 "path": "/pokemon/",
                 "runtime": ToolRuntime(state=state, context=None, tool_call_id="", store=None, stream_writer=lambda _: None, config={}),
             }
         )
+        result = result_raw
         # ls should only return files directly in /pokemon/, not in subdirectories
         assert "/pokemon/test2.txt" in result
         assert "/pokemon/charmander.txt" in result
@@ -195,12 +197,13 @@ class TestFilesystemMiddleware:
         )
         middleware = FilesystemMiddleware()
         ls_tool = next(tool for tool in middleware.tools if tool.name == "ls")
-        result = ls_tool.invoke(
+        result_raw = ls_tool.invoke(
             {
                 "path": "/",
                 "runtime": ToolRuntime(state=state, context=None, tool_call_id="", store=None, stream_writer=lambda _: None, config={}),
             }
         )
+        result = result_raw
         # ls should list both files and directories at root level
         assert "/test.txt" in result
         assert "/pokemon/" in result
@@ -238,18 +241,15 @@ class TestFilesystemMiddleware:
         middleware = FilesystemMiddleware()
         glob_search_tool = next(tool for tool in middleware.tools if tool.name == "glob")
         print(glob_search_tool)
-        result = glob_search_tool.invoke(
+        result_raw = glob_search_tool.invoke(
             {
                 "pattern": "*.py",
                 "runtime": ToolRuntime(state=state, context=None, tool_call_id="", store=None, stream_writer=lambda _: None, config={}),
             }
         )
+        result = result_raw
         # Standard glob: *.py only matches files in root directory, not subdirectories
-        assert "/test.py" in result
-        assert "/test.txt" not in result
-        assert "/pokemon/charmander.py" not in result
-        assert len(result) == 1
-        assert result[0] == "/test.py"
+        assert result == str(["/test.py"])
 
     def test_glob_search_shortterm_wildcard_pattern(self):
         state = FilesystemState(
@@ -274,12 +274,13 @@ class TestFilesystemMiddleware:
         )
         middleware = FilesystemMiddleware()
         glob_search_tool = next(tool for tool in middleware.tools if tool.name == "glob")
-        result = glob_search_tool.invoke(
+        result_raw = glob_search_tool.invoke(
             {
                 "pattern": "**/*.py",
                 "runtime": ToolRuntime(state=state, context=None, tool_call_id="", store=None, stream_writer=lambda _: None, config={}),
             }
         )
+        result = result_raw
         assert "/src/main.py" in result
         assert "/src/utils/helper.py" in result
         assert "/tests/test_main.py" in result
@@ -307,13 +308,14 @@ class TestFilesystemMiddleware:
         )
         middleware = FilesystemMiddleware()
         glob_search_tool = next(tool for tool in middleware.tools if tool.name == "glob")
-        result = glob_search_tool.invoke(
+        result_raw = glob_search_tool.invoke(
             {
                 "pattern": "*.py",
                 "path": "/src",
                 "runtime": ToolRuntime(state=state, context=None, tool_call_id="", store=None, stream_writer=lambda _: None, config={}),
             }
         )
+        result = result_raw
         assert "/src/main.py" in result
         assert "/src/utils/helper.py" not in result
         assert "/tests/test_main.py" not in result
@@ -341,12 +343,13 @@ class TestFilesystemMiddleware:
         )
         middleware = FilesystemMiddleware()
         glob_search_tool = next(tool for tool in middleware.tools if tool.name == "glob")
-        result = glob_search_tool.invoke(
+        result_raw = glob_search_tool.invoke(
             {
                 "pattern": "*.{py,pyi}",
                 "runtime": ToolRuntime(state=state, context=None, tool_call_id="", store=None, stream_writer=lambda _: None, config={}),
             }
         )
+        result = result_raw
         assert "/test.py" in result
         assert "/test.pyi" in result
         assert "/test.txt" not in result
@@ -371,7 +374,42 @@ class TestFilesystemMiddleware:
             }
         )
         print(glob_search_tool)
-        assert result == []
+        assert result == str([])
+
+    def test_glob_search_truncates_large_results(self):
+        """Test that glob results are truncated when they exceed token limit."""
+        # Create a large number of files that will exceed TOOL_RESULT_TOKEN_LIMIT
+        # TOOL_RESULT_TOKEN_LIMIT = 20000, * 4 chars/token = 80000 chars
+        # Create files with long paths to exceed this limit
+        files = {}
+        # Create 2000 files with 50-char paths = 100,000 chars total (exceeds 80k limit)
+        for i in range(2000):
+            path = f"/very_long_file_name_to_increase_size_{i:04d}.txt"
+            files[path] = FileData(
+                content=["content"],
+                modified_at="2021-01-01",
+                created_at="2021-01-01",
+            )
+
+        state = FilesystemState(messages=[], files=files)
+        middleware = FilesystemMiddleware()
+        glob_search_tool = next(tool for tool in middleware.tools if tool.name == "glob")
+        result_raw = glob_search_tool.invoke(
+            {
+                "pattern": "*.txt",
+                "runtime": ToolRuntime(state=state, context=None, tool_call_id="", store=None, stream_writer=lambda _: None, config={}),
+            }
+        )
+
+        # Result should be truncated
+        result = result_raw
+        assert isinstance(result, str)
+        assert len(result.split(", ")) < 2000  # Should be truncated to fewer files
+        # Last element should be the truncation message
+        from deepagents.backends.utils import TRUNCATION_GUIDANCE
+
+        # Need to do the :-2 to account for the wrapping list characters
+        assert result[:-2].endswith(TRUNCATION_GUIDANCE)
 
     def test_grep_search_shortterm_files_with_matches(self):
         state = FilesystemState(
@@ -946,10 +984,9 @@ class TestFilesystemMiddleware:
 
     def test_execute_tool_output_formatting(self):
         """Test execute tool formats output correctly."""
-        from deepagents.backends.protocol import ExecuteResponse
 
         # Mock sandbox backend that returns specific output
-        class FormattingMockSandboxBackend(StateBackend):
+        class FormattingMockSandboxBackend(SandboxBackendProtocol, StateBackend):
             def execute(self, command: str) -> ExecuteResponse:
                 return ExecuteResponse(
                     output="Hello world\nLine 2",
@@ -983,10 +1020,9 @@ class TestFilesystemMiddleware:
 
     def test_execute_tool_output_formatting_with_failure(self):
         """Test execute tool formats failure output correctly."""
-        from deepagents.backends.protocol import ExecuteResponse
 
         # Mock sandbox backend that returns failure
-        class FailureMockSandboxBackend(StateBackend):
+        class FailureMockSandboxBackend(SandboxBackendProtocol, StateBackend):
             def execute(self, command: str) -> ExecuteResponse:
                 return ExecuteResponse(
                     output="Error: command not found",
@@ -1020,10 +1056,9 @@ class TestFilesystemMiddleware:
 
     def test_execute_tool_output_formatting_with_truncation(self):
         """Test execute tool formats truncated output correctly."""
-        from deepagents.backends.protocol import ExecuteResponse
 
         # Mock sandbox backend that returns truncated output
-        class TruncatedMockSandboxBackend(StateBackend):
+        class TruncatedMockSandboxBackend(SandboxBackendProtocol, StateBackend):
             def execute(self, command: str) -> ExecuteResponse:
                 return ExecuteResponse(
                     output="Very long output...",
@@ -1056,11 +1091,10 @@ class TestFilesystemMiddleware:
 
     def test_supports_execution_helper_with_composite_backend(self):
         """Test _supports_execution correctly identifies CompositeBackend capabilities."""
-        from deepagents.backends.protocol import ExecuteResponse
         from deepagents.middleware.filesystem import _supports_execution
 
         # Mock sandbox backend
-        class TestSandboxBackend(StateBackend):
+        class TestSandboxBackend(SandboxBackendProtocol, StateBackend):
             def execute(self, command: str) -> ExecuteResponse:
                 return ExecuteResponse(output="test", exit_code=0, truncated=False)
 

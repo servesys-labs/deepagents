@@ -90,8 +90,6 @@ class StateBackend(BackendProtocol):
         infos.sort(key=lambda x: x.get("path", ""))
         return infos
 
-    # Removed legacy ls() convenience to keep lean surface
-
     def read(
         self,
         file_path: str,
@@ -101,9 +99,11 @@ class StateBackend(BackendProtocol):
         """Read file content with line numbers.
 
         Args:
-            file_path: Absolute file path
-            offset: Line offset to start reading from (0-indexed)
-            limit: Maximum number of lines to readReturns:
+            file_path: Absolute file path.
+            offset: Line offset to start reading from (0-indexed).
+            limit: Maximum number of lines to read.
+
+        Returns:
             Formatted file content with line numbers, or error message.
         """
         files = self.runtime.state.get("files", {})
@@ -156,8 +156,6 @@ class StateBackend(BackendProtocol):
         new_file_data = update_file_data(file_data, new_content)
         return EditResult(path=file_path, files_update={file_path: new_file_data}, occurrences=int(occurrences))
 
-    # Removed legacy grep() convenience to keep lean surface
-
     def grep_raw(
         self,
         pattern: str,
@@ -168,6 +166,7 @@ class StateBackend(BackendProtocol):
         return grep_matches_from_files(files, pattern, path, glob)
 
     def glob_info(self, pattern: str, path: str = "/") -> list[FileInfo]:
+        """Get FileInfo for files matching glob pattern."""
         files = self.runtime.state.get("files", {})
         result = _glob_search_files(files, pattern, path)
         if result == "No files found":
@@ -186,6 +185,3 @@ class StateBackend(BackendProtocol):
                 }
             )
         return infos
-
-
-# Provider classes removed: prefer callables like `lambda rt: StateBackend(rt)`
