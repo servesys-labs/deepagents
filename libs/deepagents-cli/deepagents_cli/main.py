@@ -13,6 +13,7 @@ from deepagents_cli.commands import execute_bash_command, handle_command
 from deepagents_cli.config import (
     COLORS,
     DEEP_AGENTS_ASCII,
+    AVOCADO_ASCII,
     SessionState,
     console,
     create_model,
@@ -20,6 +21,7 @@ from deepagents_cli.config import (
 )
 from deepagents_cli.execution import execute_task
 from deepagents_cli.input import create_prompt_session
+from deepagents_cli.integrations.avocadodb_auto import get_startup_info
 from deepagents_cli.integrations.sandbox_factory import (
     create_sandbox,
     get_default_working_dir,
@@ -152,7 +154,8 @@ async def simple_cli(
     """
     console.clear()
     if not no_splash:
-        console.print(DEEP_AGENTS_ASCII, style=f"bold {COLORS['primary']}")
+        # Use AvocadoDB-branded ASCII if available, else default
+        console.print(AVOCADO_ASCII, style=f"bold {COLORS['primary']}")
         console.print()
 
     # Extract sandbox ID from backend if using sandbox mode
@@ -197,6 +200,10 @@ async def simple_cli(
         console.print(f"  [dim]Code execution: Remote sandbox ({working_dir})[/dim]")
     else:
         console.print(f"  [dim]Working directory: {Path.cwd()}[/dim]")
+
+    # Show AvocadoDB startup info
+    avocado_info = get_startup_info()
+    console.print(avocado_info)
 
     console.print()
 

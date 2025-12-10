@@ -144,7 +144,7 @@ class AvocadoDBManager:
             True if server started successfully
         """
         if self.is_running():
-            print("🥑 AvocadoDB server already running")
+            # Server already running - no need to start
             return True
 
         if not self.binary_path:
@@ -175,10 +175,11 @@ class AvocadoDBManager:
             for _ in range(10):
                 time.sleep(0.5)
                 if self.is_running():
-                    print("✅ Server started")
+                    print("✅ Server started (daemon mode - stays running)")
 
-                    # Register cleanup on exit
-                    atexit.register(self.stop_server)
+                    # DO NOT register cleanup on exit - let server run as daemon
+                    # User can manually stop with: pkill avocado-server
+                    # atexit.register(self.stop_server)  # DISABLED for persistence
 
                     # Auto-ingest current directory
                     if self.auto_ingest:
@@ -413,4 +414,58 @@ def ensure_running() -> bool:
     return False
 
 
-__all__ = ["AvocadoDBManager", "get_manager", "ensure_running"]
+def get_stats() -> dict:
+    """Get indexing statistics from AvocadoDB server.
+
+    Returns:
+        Dict with stats like item_count, index_size, etc.
+        Returns empty dict if server is not available.
+    """
+    manager = get_manager()
+
+    if not manager.is_running():
+        return {}
+
+    try:
+        response = requests.get(f"{manager.server_url}/stats", timeout=2)
+        if response.status_code == 200:
+            return response.json()
+    except:
+        pass
+
+    return {}
+
+
+def get_startup_info() -> str:
+    """Get startup information for AvocadoDB.
+
+    Returns:
+        Formatted string with server status and indexing stats.
+    """
+    manager = get_manager()
+
+    # Ensure server is running (will auto-start if needed)
+    is_running = ensure_running()
+
+    if not is_running:
+        return "  [dim]🥑 AvocadoDB: Not available (install with: pip install avocadodb)[/dim]"
+
+    # Get stats
+    stats = get_stats()
+
+    if not stats:
+        return "  [dim]🥑 AvocadoDB: Server running (no stats available)[/dim]"
+
+    # Extract useful stats
+    artifacts_count = stats.get("artifacts_count", 0)
+    spans_count = stats.get("spans_count", 0)
+    total_tokens = stats.get("total_tokens", 0)
+
+    # Format the message
+    if artifacts_count > 0:
+        return f"  [green]🥑 AvocadoDB: Ready[/green] [dim]({artifacts_count} docs, {spans_count} spans, {total_tokens:,} tokens)[/dim]"
+    else:
+        return "  [yellow]🥑 AvocadoDB: Ready[/yellow] [dim](no items indexed yet - will auto-ingest on first query)[/dim]"
+
+
+__all__ = ["AvocadoDBManager", "get_manager", "ensure_running", "get_stats", "get_startup_info"]

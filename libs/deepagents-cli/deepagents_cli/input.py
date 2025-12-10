@@ -131,10 +131,15 @@ def parse_file_mentions(text: str) -> tuple[str, list[Path]]:
 def get_bottom_toolbar(
     session_state: SessionState, session_ref: dict
 ) -> Callable[[], list[tuple[str, str]]]:
-    """Return toolbar function that shows auto-approve status and BASH MODE."""
+    """Return toolbar function that shows auto-approve status, current folder, and mode."""
 
     def toolbar() -> list[tuple[str, str]]:
         parts = []
+
+        # Show current folder
+        cwd = Path.cwd()
+        parts.append(("class:toolbar-dim", f" Current folder: {cwd} "))
+        parts.append(("", " | "))
 
         # Check if we're in BASH mode (input starts with !)
         try:
@@ -148,12 +153,12 @@ def get_bottom_toolbar(
             # Silently ignore - toolbar is non-critical and called frequently
             pass
 
-        # Base status message
+        # Auto-approve status (styled like image)
         if session_state.auto_approve:
-            base_msg = "auto-accept ON (CTRL+T to toggle)"
+            base_msg = " Auto (High) - allow all commands "
             base_class = "class:toolbar-green"
         else:
-            base_msg = "manual accept (CTRL+T to toggle)"
+            base_msg = " Manual accept (CTRL+T to toggle) "
             base_class = "class:toolbar-orange"
 
         parts.append((base_class, base_msg))
@@ -171,6 +176,33 @@ def get_bottom_toolbar(
         return parts
 
     return toolbar
+
+
+def get_rprompt() -> Callable[[], str]:
+    """Return right-side prompt showing model name."""
+
+    def rprompt() -> str:
+        # Get model from environment
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            model_name = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")
+            # Simplify model name for display
+            if "claude-sonnet-4-5" in model_name:
+                return "Claude Sonnet 4.5"
+            elif "claude-sonnet-3-7" in model_name:
+                return "Claude Sonnet 3.7"
+            elif "claude-sonnet-3-5" in model_name:
+                return "Claude Sonnet 3.5"
+            elif "claude-opus" in model_name:
+                return "Claude Opus"
+            elif "haiku" in model_name:
+                return "Claude Haiku"
+            return model_name
+        elif os.environ.get("OPENAI_API_KEY"):
+            model_name = os.environ.get("OPENAI_MODEL", "gpt-5-mini")
+            return model_name.upper()
+        return "Unknown model"
+
+    return rprompt
 
 
 def create_prompt_session(_assistant_id: str, session_state: SessionState) -> PromptSession:
@@ -286,13 +318,15 @@ def create_prompt_session(_assistant_id: str, session_state: SessionState) -> Pr
 
     from prompt_toolkit.styles import Style
 
-    # Define styles for the toolbar with full-width background colors
+    # Define styles for the toolbar and prompts
     toolbar_style = Style.from_dict(
         {
             "bottom-toolbar": "noreverse",  # Disable default reverse video
-            "toolbar-green": "bg:#10b981 #000000",  # Green for auto-accept ON
-            "toolbar-orange": "bg:#f59e0b #000000",  # Orange for manual accept
-            "toolbar-exit": "bg:#2563eb #ffffff",  # Blue for exit hint
+            "toolbar-green": "bg:#10b981 #000000 bold",  # Green for auto-accept ON
+            "toolbar-orange": "bg:#f59e0b #000000 bold",  # Orange for manual accept
+            "toolbar-exit": "bg:#2563eb #ffffff bold",  # Blue for exit hint
+            "toolbar-dim": "bg:#374151 #9ca3af",  # Dim gray for current folder
+            "rprompt": "fg:#6b7280",  # Dim gray for model name on right
         }
     )
 
@@ -310,9 +344,11 @@ def create_prompt_session(_assistant_id: str, session_state: SessionState) -> Pr
         complete_in_thread=True,  # Async completion prevents menu freezing
         mouse_support=False,
         enable_open_in_editor=True,  # Allow Ctrl+X Ctrl+E to open external editor
+        placeholder=HTML('<style fg="#6b7280">Try "Search the documentation for this library"</style>'),  # Placeholder text
         bottom_toolbar=get_bottom_toolbar(
             session_state, session_ref
         ),  # Persistent status bar at bottom
+        rprompt=get_rprompt(),  # Right-side prompt showing model
         style=toolbar_style,  # Apply toolbar styling
         reserve_space_for_menu=7,  # Reserve space for completion menu to show 5-6 results
     )

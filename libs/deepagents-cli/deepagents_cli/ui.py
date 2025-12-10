@@ -11,7 +11,7 @@ from rich.markup import escape
 from rich.panel import Panel
 from rich.text import Text
 
-from .config import COLORS, COMMANDS, DEEP_AGENTS_ASCII, MAX_ARG_LENGTH, console
+from .config import COLORS, COMMANDS, AVOCADO_ASCII, MAX_ARG_LENGTH, console
 from .file_ops import FileOperationRecord
 
 
@@ -539,7 +539,7 @@ def show_interactive_help() -> None:
 def show_help() -> None:
     """Show help information."""
     console.print()
-    console.print(DEEP_AGENTS_ASCII, style=f"bold {COLORS['primary']}")
+    console.print(AVOCADO_ASCII, style=f"bold {COLORS['primary']}")
     console.print()
 
     console.print("[bold]Usage:[/bold]", style=COLORS["primary"])
